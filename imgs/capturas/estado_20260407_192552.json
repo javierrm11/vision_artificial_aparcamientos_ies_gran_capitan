@@ -1,0 +1,129 @@
+{
+  "timestamp": "2026-04-07T19:25:52",
+  "fuente": "imgs\\1.png",
+  "total_plazas": 24,
+  "libres": 13,
+  "ocupadas": 11,
+  "plazas": [
+    {
+      "id": 0,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 1,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 2,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 3,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 4,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 5,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 6,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 7,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 8,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 9,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 10,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 11,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 12,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 13,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 14,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 15,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 16,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 17,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 18,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 19,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    },
+    {
+      "id": 20,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 21,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 22,
+      "estado": "LIBRE",
+      "coches_dentro": 0
+    },
+    {
+      "id": 23,
+      "estado": "OCUPADA",
+      "coches_dentro": 1
+    }
+  ]
+}
