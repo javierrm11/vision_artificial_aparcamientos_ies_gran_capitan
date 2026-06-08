@@ -39,6 +39,7 @@ from datetime import datetime
 # ── Configuración por defecto ─────────────────
 SPOTS_JSON  = Path("imgs/spots.json")
 OUTPUT_DIR  = Path("imgs/capturas")
+NUM_PLAZAS  = 22
 CONF_UMBRAL = 0.35
 CADA_N      = 5
 CLASES_VEH  = {2, 3, 5, 7}   # car, motorcycle, bus, truck (COCO)
@@ -58,51 +59,58 @@ def cargar_spots(path: Path):
         return json.load(f)
 
 
-def punto_en_poligono(cx, cy, puntos):
+def bbox_en_zona(x1, y1, x2, y2, puntos):
+    """True si algún punto del bbox o del polígono se solapan."""
     pts = np.array(puntos, dtype=np.float32)
-    return cv2.pointPolygonTest(pts, (float(cx), float(cy)), False) >= 0
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    for px, py in [(x1,y1),(x2,y1),(x2,y2),(x1,y2),(cx,cy)]:
+        if cv2.pointPolygonTest(pts, (float(px), float(py)), False) >= 0:
+            return True
+    for px, py in puntos:
+        if x1 <= px <= x2 and y1 <= py <= y2:
+            return True
+    return False
 
 
 def detectar(model, frame, conf):
-    """Ejecuta YOLO sobre un frame y devuelve centros y bboxes de vehículos."""
-    results = model(frame, conf=conf, classes=list(CLASES_VEH), verbose=False)[0]
-    centros, boxes = [], []
+    """Ejecuta YOLO sobre un frame y devuelve bboxes de todos los objetos."""
+    results = model(frame, conf=conf, verbose=False)[0]
+    boxes = []
     for box in results.boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
-        cx = (x1 + x2) // 2
-        cy = (y1 + y2) // 2
-        centros.append((cx, cy))
         boxes.append((x1, y1, x2, y2))
-    return centros, boxes
+    return boxes
 
 
-def calcular_resultados(spots, centros):
-    """Decide LIBRE/OCUPADA por plaza según los centros detectados."""
+def calcular_resultados(spots, boxes):
+    """Cuenta objetos detectados que solapan con cada zona ROI."""
     resultados = []
     for s in spots:
-        coches = [(cx, cy) for cx, cy in centros
-                  if punto_en_poligono(cx, cy, s["points"])]
+        coches = [b for b in boxes if bbox_en_zona(*b, s["points"])]
         resultados.append({
             "id":            s["id"],
-            "estado":        "OCUPADA" if coches else "LIBRE",
-            "coches_dentro": len(coches)
+            "coches_dentro": len(coches),
         })
     return resultados
 
 
 def dibujar(frame, spots, resultados, boxes):
-    """Dibuja plazas, bboxes YOLO y HUD sobre el frame."""
+    """Dibuja zonas ROI, bboxes YOLO y HUD sobre el frame."""
     overlay = frame.copy()
 
+    total_coches = sum(r["coches_dentro"] for r in resultados)
+    libres       = max(0, NUM_PLAZAS - total_coches)
+    ocupadas     = NUM_PLAZAS - libres
+
     for s, r in zip(spots, resultados):
-        color  = COL_LIBRE if r["estado"] == "LIBRE" else COL_OCUPADA
+        color  = COL_LIBRE if libres > 0 else COL_OCUPADA
         pts_np = np.array(s["points"], dtype=np.int32)
         cv2.fillPoly(overlay, [pts_np], color)
         cv2.polylines(frame, [pts_np], isClosed=True, color=color, thickness=2)
         cx = int(pts_np[:, 0].mean())
         cy = int(pts_np[:, 1].mean())
-        cv2.putText(frame, f"{s['id']}:{'L' if r['estado']=='LIBRE' else 'O'}",
-                    (cx - 14, cy + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        cv2.putText(frame, f"Zona {s['id']}: {r['coches_dentro']} coches",
+                    (cx - 50, cy + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
     cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
 
@@ -111,11 +119,9 @@ def dibujar(frame, spots, resultados, boxes):
         cv2.circle(frame, ((x1+x2)//2, (y1+y2)//2), 5, (0, 0, 255), -1)
 
     # HUD superior
-    libres   = sum(1 for r in resultados if r["estado"] == "LIBRE")
-    ocupadas = len(resultados) - libres
-    cv2.rectangle(frame, (0, 0), (360, 34), (30, 30, 30), -1)
+    cv2.rectangle(frame, (0, 0), (400, 34), (30, 30, 30), -1)
     cv2.putText(frame,
-                f"Libres: {libres}/{len(resultados)}  Ocupadas: {ocupadas}/{len(resultados)}",
+                f"Libres: {libres}/{NUM_PLAZAS}  Ocupadas: {ocupadas}/{NUM_PLAZAS}",
                 (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
     return frame
@@ -133,15 +139,15 @@ def guardar_captura(resultados, fuente, frame=None):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    libres   = [r for r in resultados if r["estado"] == "LIBRE"]
-    ocupadas = [r for r in resultados if r["estado"] == "OCUPADA"]
+    total_coches = sum(r["coches_dentro"] for r in resultados)
+    libres       = max(0, NUM_PLAZAS - total_coches)
     datos = {
         "timestamp":    datetime.now().isoformat(timespec="seconds"),
         "fuente":       str(fuente),
-        "total_plazas": len(resultados),
-        "libres":       len(libres),
-        "ocupadas":     len(ocupadas),
-        "plazas":       resultados
+        "total_plazas": NUM_PLAZAS,
+        "libres":       libres,
+        "ocupadas":     NUM_PLAZAS - libres,
+        "zonas":        resultados
     }
 
     json_path = OUTPUT_DIR / f"estado_{ts}.json"
@@ -155,10 +161,9 @@ def guardar_captura(resultados, fuente, frame=None):
     else:
         print(f"✓ JSON guardado: {json_path.name}")
 
-    print(f"  🟢 Libres: {len(libres)}  🔴 Ocupadas: {len(ocupadas)}")
+    print(f"  🟢 Libres: {libres}  🔴 Ocupadas: {NUM_PLAZAS - libres}")
     for r in resultados:
-        icono = "🟢" if r["estado"] == "LIBRE" else "🔴"
-        print(f"  {icono} Plaza {r['id']:>2}  {r['estado']}")
+        print(f"  Zona {r['id']:>2}  Coches dentro: {r['coches_dentro']}")
 
 
 # ══════════════════════════════════════════════
@@ -171,10 +176,10 @@ def modo_imagen(model, path: Path, spots, conf, guardar_visual):
     if frame is None:
         raise FileNotFoundError(f"No se encontró: {path}")
 
-    centros, boxes = detectar(model, frame, conf)
-    print(f"  → {len(centros)} vehículos detectados")
+    boxes = detectar(model, frame, conf)
+    print(f"  → {len(boxes)} objetos detectados")
 
-    resultados = calcular_resultados(spots, centros)
+    resultados = calcular_resultados(spots, boxes)
     frame_viz  = dibujar(frame.copy(), spots, resultados, boxes)
 
     guardar_captura(resultados, path, frame=frame_viz if guardar_visual else None)
@@ -210,8 +215,8 @@ def modo_video(model, fuente, spots, conf, cada):
         frame_count += 1
 
         if frame_count % cada == 0:
-            centros, boxes = detectar(model, frame, conf)
-            resultados     = calcular_resultados(spots, centros)
+            boxes      = detectar(model, frame, conf)
+            resultados = calcular_resultados(spots, boxes)
 
         frame_viz = dibujar(frame.copy(), spots, resultados, boxes)
         frame_viz = dibujar_leyenda_video(frame_viz)
