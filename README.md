@@ -1,22 +1,21 @@
 # Detector de Aparcamiento con Visión Artificial
 
-Sistema de detección de plazas libres/ocupadas en aparcamientos mediante cámara de vigilancia y YOLOv8.
+Sistema de detección de plazas libres/ocupadas en aparcamientos mediante cámara de vigilancia, YOLOv8 y bot de Telegram.
 
 ---
 
 ## Cómo funciona
 
-El sistema se compone de dos herramientas independientes:
-
 ```
-marcar_plazas.py   →   spots.json   →   detector_yolo.py
-   (dibujar ROIs)      (zonas)         (detectar + contar)
+marcar_plazas.py  →  spots.json  →  detector_yolo.py  →  bot_telegram.py
+  (dibujar ROIs)     (zonas)        (detectar + contar)   (responder por Telegram)
 ```
 
 1. **`marcar_plazas.py`**: se ejecuta una sola vez para dibujar polígonos (zonas ROI) sobre una captura del aparcamiento. Guarda las zonas en `imgs/spots.json`.
-2. **`detector_yolo.py`**: carga las zonas y analiza en tiempo real (webcam, vídeo o imagen) cuántos objetos hay dentro de cada zona. Calcula `Libres = NUM_PLAZAS − coches_detectados`.
+2. **`detector_yolo.py`**: carga las zonas y analiza una imagen con YOLOv8. Calcula `Libres = NUM_PLAZAS − coches_detectados` y guarda el resultado en `imgs/estado_actual.json`.
+3. **`bot_telegram.py`**: bot de Telegram que, al recibir `/estado`, ejecuta la detección en tiempo real sobre `imgs/1.png` y responde con las plazas libres y la hora.
 
-La detección usa **YOLOv8n** (nano) para máxima velocidad. Cualquier objeto que solape con una zona ROI cuenta como plaza ocupada — no solo el centro del bbox, sino cualquier punto del rectángulo de detección.
+La detección usa **YOLOv8n** (nano). Cualquier objeto que solape con una zona ROI cuenta como plaza ocupada — se comprueba el solapamiento completo del bbox, no solo el centro.
 
 ---
 
@@ -32,10 +31,10 @@ venv\Scripts\activate        # Windows
 ```
 
 ```bash
-pip install ultralytics opencv-python numpy
+pip install ultralytics opencv-python numpy python-telegram-bot python-dotenv
 ```
 
-El modelo `yolov8n.pt` se descarga automáticamente la primera vez que se ejecuta el detector.
+El modelo `yolov8n.pt` se descarga automáticamente la primera vez.
 
 ---
 
@@ -43,13 +42,17 @@ El modelo `yolov8n.pt` se descarga automáticamente la primera vez que se ejecut
 
 ```
 aparcamiento/
-├── marcar_plazas.py      # Herramienta para marcar zonas ROI
-├── detector_yolo.py      # Detector principal
-├── yolov8n.pt            # Modelo YOLOv8 nano (se descarga automáticamente)
+├── marcar_plazas.py          # Herramienta para marcar zonas ROI
+├── detector_yolo.py          # Detector principal (imagen)
+├── bot_telegram.py           # Bot de Telegram
+├── .env                      # Token del bot (no subir al repositorio)
+├── .gitignore
+├── yolov8n.pt                # Modelo YOLOv8 nano (se descarga automáticamente)
 └── imgs/
-    ├── 1.png             # Imagen de referencia para marcar zonas
-    ├── spots.json        # Zonas ROI guardadas
-    └── capturas/         # Capturas guardadas con G (se genera automáticamente)
+    ├── 1.png                 # Imagen del aparcamiento que analiza el bot
+    ├── spots.json            # Zonas ROI guardadas
+    ├── estado_actual.json    # Estado más reciente (generado automáticamente)
+    └── capturas/             # Capturas históricas (generadas con G)
         ├── captura_YYYYMMDD_HHMMSS.png
         └── estado_YYYYMMDD_HHMMSS.json
 ```
@@ -75,49 +78,65 @@ python marcar_plazas.py
 | `S` | Guardar `spots.json` |
 | `Q` / `ESC` | Salir (pregunta si guardar) |
 
-Cada zona marcada representa un **grupo de plazas** (pasillo izquierdo, pasillo derecho, etc.). El número total de plazas del aparcamiento se configura con `NUM_PLAZAS` en `detector_yolo.py`.
+Cada zona representa un **grupo de plazas**. El total de plazas se configura con `NUM_PLAZAS` en `detector_yolo.py`.
 
 ---
 
-## Paso 2 — Ejecutar el detector
-
-### Imagen estática
+## Paso 2 — Ejecutar el detector (imagen estática)
 
 ```bash
-python detector_yolo.py --fuente imgs/foto.png
-```
-
-### Archivo de vídeo
-
-```bash
-python detector_yolo.py --fuente imgs/video.mp4
-python detector_yolo.py --fuente imgs/video.webm
-python detector_yolo.py --fuente imgs/video.avi
-```
-
-### Webcam
-
-```bash
-python detector_yolo.py                  # webcam por defecto (índice 0)
-python detector_yolo.py --fuente 1       # segunda webcam
+python detector_yolo.py --fuente imgs/1.png
 ```
 
 ### Opciones
 
 | Argumento | Por defecto | Descripción |
 |-----------|-------------|-------------|
-| `--fuente` | `0` | Imagen, vídeo o índice de webcam |
-| `--conf` | `0.35` | Confianza mínima YOLO (0.0 – 1.0) |
-| `--cada` | `5` | Analizar 1 de cada N frames (vídeo/webcam) |
-| `--visual` | off | Guardar imagen anotada al analizar imagen estática |
+| `--fuente` | `0` | Ruta a la imagen |
+| `--conf` | `0.30` | Confianza mínima YOLO (0.0 – 1.0) |
+| `--visual` | off | Guardar imagen anotada en `imgs/capturas/` |
 | `--spots` | `imgs/spots.json` | Ruta al archivo de zonas |
 
-### Controles en vídeo/webcam
+Al ejecutar, genera automáticamente `imgs/estado_actual.json` con el resultado.
 
-| Tecla | Acción |
-|-------|--------|
-| `G` | Guardar captura actual (imagen PNG + JSON de estado) |
-| `Q` / `ESC` | Salir |
+---
+
+## Paso 3 — Bot de Telegram
+
+### Configuración
+
+Crea el fichero `.env` en la raíz del proyecto:
+
+```
+TELEGRAM_TOKEN=tu_token_aqui
+```
+
+Obtén el token creando un bot con [@BotFather](https://t.me/BotFather) en Telegram.
+
+### Arrancar el bot
+
+```bash
+python bot_telegram.py
+```
+
+### Comandos disponibles
+
+| Comando | Acción |
+|---------|--------|
+| `/start` | Mensaje de bienvenida |
+| `/estado` | Analiza `imgs/1.png` y devuelve plazas libres/ocupadas |
+| `/plazas` | Igual que `/estado` |
+| Cualquier texto | Igual que `/estado` |
+
+### Ejemplo de respuesta
+
+```
+🟢 Hay 9 plazas libres de 22.
+🔴 Ocupadas: 13/22
+⏱ Actualizado: 17:42:05
+```
+
+El bot muestra "🔍 Analizando aparcamiento..." mientras ejecuta YOLO y luego edita el mensaje con el resultado.
 
 ---
 
@@ -125,14 +144,11 @@ python detector_yolo.py --fuente 1       # segunda webcam
 
 ```python
 NUM_PLAZAS  = 22      # Total de plazas del aparcamiento
-CONF_UMBRAL = 0.35    # Confianza mínima YOLO
-CADA_N      = 5       # Analizar 1 de cada N frames
+CONF_UMBRAL = 0.30    # Confianza mínima YOLO
 ```
 
-Ajusta `NUM_PLAZAS` al número real de plazas de tu aparcamiento. El sistema calcula:
-
 ```
-Libres   = NUM_PLAZAS − coches detectados en zonas ROI
+Libres   = NUM_PLAZAS − objetos detectados en zonas ROI
 Ocupadas = NUM_PLAZAS − Libres
 ```
 
@@ -153,18 +169,13 @@ Ocupadas = NUM_PLAZAS − Libres
 ]
 ```
 
-Cada entrada define un polígono con sus vértices en coordenadas de la imagen original (sin escalar).
-
 ---
 
-## Formato del JSON de captura
-
-Al pulsar `G` o al analizar una imagen con `--visual`, se genera:
+## Formato de `estado_actual.json`
 
 ```json
 {
-  "timestamp": "2026-03-17T17:42:00",
-  "fuente": "imgs/video.mp4",
+  "timestamp": "2026-03-17T17:42:05",
   "total_plazas": 22,
   "libres": 9,
   "ocupadas": 13,
@@ -180,26 +191,44 @@ Al pulsar `G` o al analizar una imagen con `--visual`, se genera:
 
 ## Mejoras posibles
 
+### Detección
+
 | Mejora | Descripción |
 |--------|-------------|
-| **Suavizado temporal** | Marcar una plaza ocupada solo si lleva N frames consecutivos con coche, evitando falsos positivos por coches en movimiento |
-| **Umbral de solapamiento** | Exigir que el X% del bbox esté dentro de la zona, no solo un píxel de contacto |
-| **Filtro por clase** | Ignorar personas/bicicletas que crucen la zona usando las clases COCO (2=car, 3=moto, 5=bus, 7=truck) |
-| **Zona de exclusión/pasillo** | Dibujar zonas que se excluyen del conteo para evitar contar coches en movimiento |
-| **Histórico de ocupación** | Registrar el estado cada N minutos en CSV/SQLite para graficar la ocupación a lo largo del día |
-| **API REST** | Exponer el estado actual en JSON vía HTTP (`/api/estado`) para integrarlo con una web o panel |
-| **Alertas** | Notificar por email/webhook cuando el aparcamiento se llena o queda libre |
-| **Modelo más preciso** | Cambiar `yolov8n.pt` por `yolov8s.pt` o `yolov8m.pt` para mejor detección a costa de más CPU |
+| **Suavizado temporal** | Marcar una plaza ocupada solo si lleva N análisis consecutivos con coche, evitando falsos positivos por coches en movimiento o sombras |
+| **Umbral de solapamiento** | Exigir que al menos el X% del bbox esté dentro de la zona (ej. 30%), no solo un píxel de contacto |
+| **Filtro por clase COCO** | Ignorar personas, bicicletas o bolsas usando las clases COCO (2=car, 3=moto, 5=bus, 7=truck) |
+| **Zona de pasillo/exclusión** | Marcar zonas que se excluyen del conteo para ignorar el carril de circulación |
+| **Modelo más preciso** | Cambiar `yolov8n.pt` → `yolov8s.pt` o `yolov8m.pt` para mejor detección a costa de más CPU/tiempo |
+| **Imagen desde cámara IP** | Reemplazar `imgs/1.png` por un frame capturado en tiempo real de una cámara RTSP |
+
+### Bot de Telegram
+
+| Mejora | Descripción |
+|--------|-------------|
+| **Avisos automáticos** | Notificar a los suscriptores cuando el aparcamiento se llena o vuelve a tener plazas |
+| **Foto adjunta** | Enviar la imagen anotada junto al mensaje de estado (`--visual`) |
+| **Actualización periódica** | Actualizar `imgs/1.png` automáticamente desde una cámara cada N minutos |
+| **Lista de usuarios** | Guardar qué usuarios han hecho `/start` para enviarles alertas |
+| **Comando `/foto`** | Devolver la última captura anotada guardada en `imgs/capturas/` |
+
+### Infraestructura
+
+| Mejora | Descripción |
+|--------|-------------|
+| **Histórico CSV/SQLite** | Registrar el estado cada N minutos para graficar la ocupación a lo largo del día |
+| **Panel web** | Dashboard con la imagen en vivo y gráfica de ocupación (Flask + Chart.js) |
+| **API REST** | Endpoint `/api/estado` que devuelve el JSON para integrarlo con otros sistemas |
+| **Despliegue como servicio** | Ejecutar el bot como servicio de Windows (`sc create`) o systemd en Linux |
 
 ---
 
-## Ejemplo de resultado
+## Ejemplo de salida del detector
 
 ```
-▸ Modo VÍDEO (imgs/video.mp4)
-▸ Detección activa. [G]=guardar  [Q/ESC]=salir
-
-✓ Guardado: captura_20260317_174200.png  +  estado_20260317_174200.json
+▸ Modo IMAGEN: imgs/1.png
+  → 12 objetos detectados
+✓ JSON guardado: estado_20260317_174205.json
   🟢 Libres: 9   🔴 Ocupadas: 13
   Zona  0  Coches dentro: 5
   Zona  1  Coches dentro: 4
@@ -212,4 +241,4 @@ Al pulsar `G` o al analizar una imagen con `--visual`, se genera:
 
 Desarrollado para el **IES Gran Capitán** como proyecto de visión artificial aplicada a gestión de aparcamientos.
 
-Tecnologías: [YOLOv8 (Ultralytics)](https://github.com/ultralytics/ultralytics) · OpenCV · NumPy · Python
+Tecnologías: [YOLOv8 (Ultralytics)](https://github.com/ultralytics/ultralytics) · OpenCV · NumPy · python-telegram-bot · Python

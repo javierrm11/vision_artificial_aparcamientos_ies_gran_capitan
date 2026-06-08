@@ -17,6 +17,7 @@ Configuración:
 ────────────────────────────────────────────────
 """
 
+import io
 import os
 import cv2
 from pathlib import Path
@@ -26,7 +27,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 from detector_yolo import (
-    cargar_spots, detectar, calcular_resultados,
+    cargar_spots, detectar, calcular_resultados, dibujar,
     guardar_estado_actual, NUM_PLAZAS, SPOTS_JSON,
 )
 
@@ -45,7 +46,7 @@ print(f"  → {len(spots)} zonas cargadas\n")
 # ─────────────────────────────────────────────
 
 
-def analizar_imagen() -> dict:
+def analizar_imagen() -> tuple[dict, bytes]:
     frame = cv2.imread(str(IMAGEN_PATH))
     if frame is None:
         raise FileNotFoundError(f"No se encontró la imagen: {IMAGEN_PATH}")
@@ -53,22 +54,33 @@ def analizar_imagen() -> dict:
     resultados = calcular_resultados(spots, boxes)
     guardar_estado_actual(resultados)
 
+    frame_viz = dibujar(frame.copy(), spots, resultados, boxes)
+    _, buf = cv2.imencode(".jpg", frame_viz)
+    foto = io.BytesIO(buf.tobytes())
+    foto.name = "estado.jpg"
+
     total_coches = sum(r["coches_dentro"] for r in resultados)
     libres       = max(0, NUM_PLAZAS - total_coches)
-    return {"libres": libres, "ocupadas": NUM_PLAZAS - libres, "total": NUM_PLAZAS}
+    return {"libres": libres, "ocupadas": NUM_PLAZAS - libres, "total": NUM_PLAZAS}, foto
 
 
 def formatear_respuesta(datos: dict) -> str:
+    from datetime import datetime
     libres   = datos["libres"]
     ocupadas = datos["ocupadas"]
     total    = datos["total"]
+    hora     = datetime.now().strftime("%H:%M:%S")
     if libres > 0:
         return (
             f"🟢 Hay {libres} plaza{'s' if libres != 1 else ''} libre{'s' if libres != 1 else ''} "
             f"de {total}.\n"
-            f"🔴 Ocupadas: {ocupadas}/{total}"
+            f"🔴 Ocupadas: {ocupadas}/{total}\n"
+            f"⏱ Actualizado: {hora}"
         )
-    return f"🔴 Aparcamiento completo — 0/{total} plazas libres."
+    return (
+        f"🔴 Aparcamiento completo — 0/{total} plazas libres.\n"
+        f"⏱ Actualizado: {hora}"
+    )
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,8 +93,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🔍 Analizando aparcamiento...")
     try:
-        datos = analizar_imagen()
-        await msg.edit_text(formatear_respuesta(datos))
+        datos, foto = analizar_imagen()
+        await msg.delete()
+        await update.message.reply_photo(photo=foto, caption=formatear_respuesta(datos))
     except FileNotFoundError:
         await msg.edit_text(f"⚠️ No se encontró la imagen en {IMAGEN_PATH}.")
     except Exception as e:
