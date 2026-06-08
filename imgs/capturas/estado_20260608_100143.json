@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-06-08T10:01:43",
+  "fuente": "imgs\\1.PNG",
+  "total_plazas": 22,
+  "libres": 9,
+  "ocupadas": 13,
+  "zonas": [
+    {
+      "id": 0,
+      "coches_dentro": 6
+    },
+    {
+      "id": 1,
+      "coches_dentro": 1
+    },
+    {
+      "id": 2,
+      "coches_dentro": 6
+    }
+  ]
+}
