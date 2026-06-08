@@ -37,12 +37,11 @@ from pathlib import Path
 from datetime import datetime
 
 # ── Configuración por defecto ─────────────────
-SPOTS_JSON  = Path("imgs/spots.json")
-OUTPUT_DIR  = Path("imgs/capturas")
-NUM_PLAZAS  = 22
-CONF_UMBRAL = 0.35
-CADA_N      = 5
-CLASES_VEH  = {2, 3, 5, 7}   # car, motorcycle, bus, truck (COCO)
+SPOTS_JSON     = Path("imgs/spots.json")
+OUTPUT_DIR     = Path("imgs/capturas")
+ESTADO_ACTUAL  = Path("imgs/estado_actual.json")
+NUM_PLAZAS     = 22
+CONF_UMBRAL    = 0.30
 # ─────────────────────────────────────────────
 
 COL_LIBRE   = (0, 220, 80)
@@ -135,6 +134,22 @@ def dibujar_leyenda_video(frame):
     return frame
 
 
+def guardar_estado_actual(resultados):
+    """Sobreescribe imgs/estado_actual.json con el estado más reciente."""
+    total_coches = sum(r["coches_dentro"] for r in resultados)
+    libres       = max(0, NUM_PLAZAS - total_coches)
+    datos = {
+        "timestamp":    datetime.now().isoformat(timespec="seconds"),
+        "total_plazas": NUM_PLAZAS,
+        "libres":       libres,
+        "ocupadas":     NUM_PLAZAS - libres,
+        "zonas":        resultados
+    }
+    ESTADO_ACTUAL.parent.mkdir(parents=True, exist_ok=True)
+    with open(ESTADO_ACTUAL, "w") as f:
+        json.dump(datos, f, indent=2, ensure_ascii=False)
+
+
 def guardar_captura(resultados, fuente, frame=None):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -182,6 +197,7 @@ def modo_imagen(model, path: Path, spots, conf, guardar_visual):
     resultados = calcular_resultados(spots, boxes)
     frame_viz  = dibujar(frame.copy(), spots, resultados, boxes)
 
+    guardar_estado_actual(resultados)
     guardar_captura(resultados, path, frame=frame_viz if guardar_visual else None)
 
     # Mostrar siempre la ventana en modo imagen
@@ -258,8 +274,6 @@ def main():
                         help="Imagen (.png/.jpg), índice webcam (0,1…) o vídeo (.webm/.mp4) (def: 0)")
     parser.add_argument("--conf",    type=float, default=CONF_UMBRAL,
                         help=f"Confianza YOLO 0-1 (def: {CONF_UMBRAL})")
-    parser.add_argument("--cada",    type=int,   default=CADA_N,
-                        help=f"Analizar 1 de cada N frames en vídeo/webcam (def: {CADA_N})")
     parser.add_argument("--visual",  action="store_true",
                         help="Guardar imagen anotada en imgs/capturas/ (modo imagen)")
     parser.add_argument("--spots",   default=str(SPOTS_JSON),
