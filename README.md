@@ -126,7 +126,6 @@ python bot_telegram.py
 | `/start` | Mensaje de bienvenida |
 | `/estado` | Analiza `imgs/1.png` y devuelve plazas libres/ocupadas |
 | `/plazas` | Igual que `/estado` |
-| Cualquier texto | Igual que `/estado` |
 
 ### Ejemplo de respuesta
 
