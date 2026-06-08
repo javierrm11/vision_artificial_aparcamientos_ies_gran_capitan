@@ -233,7 +233,9 @@ Ocupadas = NUM_PLAZAS − Libres
   Zona  1  Coches dentro: 4
   Zona  2  Coches dentro: 4
 ```
-![ejemplo](./imgs/ejemplo.png)
+![ejemplo](./imgs/ejemplo1.png)
+![ejemplo](./imgs/ejemplo3.png)
+![ejemplo](./imgs/ejemplo4.png)
 
 ---
 
