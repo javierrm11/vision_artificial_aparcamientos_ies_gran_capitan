@@ -1,8 +1,17 @@
 """
-detector.py
-────────────────────────────────────────────────
-Detector de plazas de aparcamiento con YOLOv8.
-Acepta imagen estática, webcam o archivo de vídeo.
+================================================================================
+MÓDULO CORE: MOTOR DE INFERENCIA SENSORIAL Y GEOMETRÍA COMPUTACIONAL
+================================================================================
+Asignatura: Visión Artificial | Proyecto: Gestión de Aparcamiento Inteligente
+Desarrollado por: Javier y Pako
+
+PROPÓSITO TÉCNICO:
+Este script constituye el núcleo algorítmico del proyecto. Carga las zonas de 
+interés (ROIs) digitalizadas previamente en formato JSON y ejecuta el modelo
+YOLOv8 sobre el flujo visual. Evalúa si el Bounding Box de la IA interseca
+matemáticamente con los polígonos del parking según el umbral estipulado,
+aislando los vehículos ajenos a la instalación.
+================================================================================
 
 Uso:
     # Imagen estática
@@ -36,19 +45,11 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# ── Configuración por defecto ─────────────────
-SPOTS_JSON     = Path("imgs/spots.json")
-OUTPUT_DIR     = Path("imgs/capturas")
-ESTADO_ACTUAL     = Path("imgs/estado_actual.json")
-NUM_PLAZAS        = 22
-CONF_UMBRAL       = 0.15
-SOLAPAMIENTO_MIN  = 0.10   # fracción mínima del bbox dentro del ROI (0.0-1.0)
-# ─────────────────────────────────────────────
-
-COL_LIBRE   = (0, 220, 80)
-COL_OCUPADA = (0, 60, 220)
-COL_YOLO    = (0, 165, 255)
-
+# REFACTORIZACIÓN: Importación de vuestras constantes y configuraciones exactas
+from config import (
+    SPOTS_JSON, OUTPUT_DIR, ESTADO_ACTUAL, NUM_PLAZAS, CONF_UMBRAL,
+    SOLAPAMIENTO_MIN, MODELO_YOLO, COL_LIBRE, COL_OCUPADA, COL_YOLO
+)
 
 # ══════════════════════════════════════════════
 # Utilidades comunes
@@ -282,7 +283,7 @@ def main():
 
     print("▸ Cargando YOLOv8...")
     from ultralytics import YOLO
-    model = YOLO("yolo11x.pt")
+    model = MODELO_YOLO
 
     print(f"▸ Cargando plazas desde '{args.spots}'...")
     spots = cargar_spots(Path(args.spots))
