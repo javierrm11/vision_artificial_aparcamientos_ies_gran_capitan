@@ -35,8 +35,8 @@ from detector_yolo import (
 # Cargamos el archivo de entorno local con las credenciales de seguridad (.env)
 load_dotenv()
 
-# Dataset de simulación visual: El bot seleccionará aleatoriamente un frame para simular transmisiones en vivo
-IMAGENES = [Path(f"imgs/{i}.png") for i in range(1, 5)]
+# Dataset de simulación visual: El bot seleccionará aleatoriamente un frame para simular transmisiones en vivo.
+IMAGENES = [Path(f"imgs/{i}.png") for i in range(1, 4)]
 
 
 # ── FASE DE INICIALIZACIÓN DEL SERVICIO (SINGLETON DE CARGA ÚNICA) ───────────

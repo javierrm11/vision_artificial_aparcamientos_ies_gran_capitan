@@ -17,7 +17,8 @@ from datetime import datetime
 # REFACTORIZACIÓN INTEGRAL: Importación estricta de vuestros parámetros validados
 from config import (
     SPOTS_JSON, OUTPUT_DIR, ESTADO_ACTUAL, NUM_PLAZAS, CONF_UMBRAL,
-    SOLAPAMIENTO_MIN, MODELO_YOLO, COL_LIBRE, COL_OCUPADA, COL_YOLO
+    SOLAPAMIENTO_MIN, MODELO_YOLO, COL_LIBRE, COL_PARCIAL, COL_OCUPADA,
+    COL_YOLO, UMBRAL_PARCIAL,
 )
 
 
@@ -81,22 +82,42 @@ def dibujar(frame, spots, resultados, boxes) -> np.ndarray:
     libres       = max(0, NUM_PLAZAS - total_coches)
     ocupadas     = NUM_PLAZAS - libres
 
-    # Pintado de las Regiones de Interés Poligonales
-    for s, r in zip(spots, resultados):
-        # Lógica semáforo: Si la zona específica contiene vehículos, cambia de estado
-        color  = COL_OCUPADA if r["coches_dentro"] > 0 else COL_LIBRE
+    # Capacidad por zona: usa "capacidad" del JSON si existe, si no estima por área
+    areas = [cv2.contourArea(np.array(s.get("points", []), dtype=np.float32)) for s in spots]
+    total_area = sum(areas) or 1
+    caps = [
+        s["capacidad"] if "capacidad" in s
+        else max(1, round(a / total_area * NUM_PLAZAS))
+        for s, a in zip(spots, areas)
+    ]
+
+    def color_zona(coches, capacidad):
+        if coches == 0:
+            return COL_LIBRE
+        ratio = coches / capacidad
+        if ratio >= 1.0:
+            return COL_OCUPADA   # rojo: llena
+        if ratio >= UMBRAL_PARCIAL:
+            return COL_PARCIAL   # naranja: >50%
+        return COL_LIBRE         # verde: <50%
+
+    # Relleno semitransparente — solo sobre overlay, antes del blend
+    for s, r, cap in zip(spots, resultados, caps):
         pts_np = np.array(s["points"], dtype=np.int32)
-        
-        cv2.fillPoly(overlay, [pts_np], color)
+        cv2.fillPoly(overlay, [pts_np], color_zona(r["coches_dentro"], cap))
+
+    # Blend de transparencia
+    cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
+
+    # Contornos y texto DESPUÉS del blend → sin efecto fantasma
+    for s, r, cap in zip(spots, resultados, caps):
+        color  = color_zona(r["coches_dentro"], cap)
+        pts_np = np.array(s["points"], dtype=np.int32)
         cv2.polylines(frame, [pts_np], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
-        
         cx = int(pts_np[:, 0].mean())
         cy = int(pts_np[:, 1].mean())
         cv2.putText(frame, f"Z{s['id']}: {r['coches_dentro']} veh",
-                    (cx - 35, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
-
-    # Fusión alfanumérica de transparencia (Blending)
-    cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
+                    (cx - 35, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
 
     # Renderizado de los Bounding Boxes de YOLO (Color Naranja Corporativo)
     for x1, y1, x2, y2 in boxes:
@@ -107,7 +128,7 @@ def dibujar(frame, spots, resultados, boxes) -> np.ndarray:
     cv2.rectangle(frame, (0, 0), (420, 35), (30, 30, 30), -1)
     cv2.putText(frame,
                 f"Libres: {libres}/{NUM_PLAZAS} | Ocupadas: {ocupadas}/{NUM_PLAZAS}",
-                (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+                (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
 
     return frame
 

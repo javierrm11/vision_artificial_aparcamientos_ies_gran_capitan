@@ -108,13 +108,14 @@ def main():
 
     spots = load_spots(SPOTS_JSON)
     current_pts = []
+    pendiente_capacidad = None  # ID de zona recién cerrada que espera input de capacidad
     status_msg = f"Controles — Clic: Añadir | Doble Clic: Cerrar Plaza | Plazas: {len(spots)}"
 
     WIN = "Calibrador de Plazas de Aparcamiento"
     cv2.namedWindow(WIN)
 
     def mouse_cb(event, x, y, flags, param):
-        nonlocal current_pts, status_msg, spots
+        nonlocal current_pts, status_msg, spots, pendiente_capacidad
         ox = int(x / scale)
         oy = int(y / scale)
 
@@ -127,7 +128,8 @@ def main():
                 next_id = max([s["id"] for s in spots]) + 1 if spots else 0
                 spots.append({"id": next_id, "points": list(current_pts)})
                 current_pts = []
-                status_msg = f"✓ Plaza {next_id} cerrada con éxito | Total: {len(spots)}"
+                pendiente_capacidad = next_id
+                status_msg = f"✓ Zona {next_id} cerrada — escribe la capacidad en la consola"
             else:
                 status_msg = "⚠ Error geométrico: Se requieren mínimo 3 vértices para cerrar una ROI"
 
@@ -140,6 +142,22 @@ def main():
     while True:
         frame = render(base_img, spots, current_pts, scale, status_msg)
         cv2.imshow(WIN, frame)
+
+        # Preguntar capacidad real en consola justo tras cerrar una zona
+        if pendiente_capacidad is not None:
+            cv2.waitKey(1)  # forzar refresco antes de bloquear en input()
+            zone_id = pendiente_capacidad
+            pendiente_capacidad = None
+            try:
+                cap_str = input(f"  ¿Cuántas plazas tiene la Zona {zone_id}? [Enter = automático]: ").strip()
+                if cap_str.isdigit() and int(cap_str) > 0:
+                    spots[-1]["capacidad"] = int(cap_str)
+                    status_msg = f"✓ Zona {zone_id}: {cap_str} plazas reales | Total zonas: {len(spots)}"
+                else:
+                    status_msg = f"✓ Zona {zone_id} cerrada (capacidad automática) | Total: {len(spots)}"
+            except (EOFError, ValueError):
+                status_msg = f"✓ Zona {zone_id} cerrada (capacidad automática) | Total: {len(spots)}"
+
         key = cv2.waitKey(20) & 0xFF
 
         if key in (27, ord('q'), ord('Q')):

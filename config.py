@@ -21,6 +21,10 @@ SOLAPAMIENTO_MIN  = 0.10                        # Fracción mínima del bbox den
 MODELO_YOLO       = "yolo11x.pt"                # Modelo base 11x
 
 # ── PALETA CROMÁTICA GLOBAL BGR (OpenCV) ORIGINAL ────────────────────────────
-COL_LIBRE         = (0, 220, 80)                # Verde
-COL_OCUPADA       = (0, 60, 220)                # Rojo/Marrón original
-COL_YOLO          = (0, 165, 255)               # Naranja para cajas YOLO
+COL_LIBRE         = (0, 220, 80)                # Verde  — zona con plazas libres
+COL_PARCIAL       = (0, 165, 255)               # Naranja — zona parcialmente ocupada
+COL_OCUPADA       = (0, 0, 220)                 # Rojo   — zona completa
+COL_YOLO          = (30, 200, 255)              # Amarillo claro para cajas YOLO
+
+# Umbral de ocupación a partir del cual la zona pasa a naranja (0.0-1.0)
+UMBRAL_PARCIAL    = 0.50
