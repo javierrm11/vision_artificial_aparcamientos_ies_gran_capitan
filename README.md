@@ -88,7 +88,7 @@ python marcar_plazas.py
 | `S` | Guardar `spots.json` |
 | `Q` / `ESC` | Salir (pregunta si guardar) |
 
-Cada zona representa un **grupo de plazas**. El total de plazas se configura con `NUM_PLAZAS` en `detector_yolo.py`.
+Cada zona representa un **grupo de plazas**. Al cerrar cada zona, la consola pregunta cuántas plazas reales tiene; ese valor se guarda como `capacidad` en `spots.json`. El total global se configura con `NUM_PLAZAS` en `config.py`.
 
 ---
 
@@ -156,15 +156,27 @@ python bot_telegram.py
 
 ---
 
-## Configuración principal (`detector_yolo.py`)
+## Configuración principal (`config.py`)
 
 ```python
 NUM_PLAZAS       = 22     # Total de plazas del aparcamiento
-CONF_UMBRAL      = 0.30   # Confianza mínima YOLO (0.0-1.0)
-SOLAPAMIENTO_MIN = 0.20   # Fracción mínima del bbox dentro del ROI (0.0-1.0)
+CONF_UMBRAL      = 0.15   # Confianza mínima YOLO (0.0-1.0)
+SOLAPAMIENTO_MIN = 0.10   # Fracción mínima del bbox dentro del ROI (0.0-1.0)
+UMBRAL_PARCIAL   = 0.50   # Ocupación a partir de la cual la zona pasa a naranja
+MODELO_YOLO      = "yolo11x.pt"
 ```
 
-Aumentar `SOLAPAMIENTO_MIN` reduce falsos positivos de coches que solo rozan el borde de una zona. Bajarlo hace la detección más permisiva.
+Aumentar `SOLAPAMIENTO_MIN` reduce falsos positivos de coches que solo rozan el borde de una zona. `UMBRAL_PARCIAL` controla el umbral entre verde y naranja (por defecto 50%).
+
+### Sistema de colores por zona
+
+| Color | Significado |
+|-------|-------------|
+| Verde | 0 coches o menos del 50% de la capacidad ocupada |
+| Naranja | Entre 50% y 99% de la capacidad ocupada |
+| Rojo | Zona llena (100% o más) |
+
+La capacidad de cada zona se lee del campo `capacidad` en `spots.json`. Si no está definido, se estima proporcionalmente al área del polígono respecto al total.
 
 ---
 
@@ -184,6 +196,36 @@ Aumentar `SOLAPAMIENTO_MIN` reduce falsos positivos de coches que solo rozan el 
 ```
 
 Cada entrada define un polígono con sus vértices en coordenadas de la imagen original (sin escalar).
+
+El campo `capacidad` es opcional. Si está presente, el detector lo usa como número real de plazas de esa zona. Si no está, estima la capacidad de forma proporcional al área del polígono.
+
+```json
+[
+  {
+    "id": 0,
+    "points": [[366, 575], [333, 713], [806, 714], [786, 553]],
+    "capacidad": 2
+  },
+  {
+    "id": 1,
+    "points": [[3, 431], [156, 313], ["..."]],
+    "capacidad": 9
+  },
+  {
+    "id": 2,
+    "points": [[845, 35], [938, 163], ["..."]],
+    "capacidad": 11
+  }
+]
+```
+
+Al ejecutar `marcar_plazas.py`, tras cerrar cada zona con doble clic, la consola pregunta:
+
+```
+  ¿Cuántas plazas tiene la Zona 0? [Enter = automático]:
+```
+
+Escribe el número real de plazas o pulsa Enter para dejar que el detector lo estime por área.
 
 ---
 
