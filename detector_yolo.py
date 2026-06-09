@@ -4,38 +4,7 @@ MÓDULO CORE: MOTOR DE INFERENCIA SENSORIAL Y GEOMETRÍA COMPUTACIONAL
 ================================================================================
 Asignatura: Visión Artificial | Proyecto: Gestión de Aparcamiento Inteligente
 Desarrollado por: Javier y Pako
-
-PROPÓSITO TÉCNICO:
-Este script constituye el núcleo algorítmico del proyecto. Carga las zonas de 
-interés (ROIs) digitalizadas previamente en formato JSON y ejecuta el modelo
-YOLOv8 sobre el flujo visual. Evalúa si el Bounding Box de la IA interseca
-matemáticamente con los polígonos del parking según el umbral estipulado,
-aislando los vehículos ajenos a la instalación.
 ================================================================================
-
-Uso:
-    # Imagen estática
-    python detector.py --fuente imgs/foto.png
-
-    # Webcam (índice 0 por defecto)
-    python detector.py
-
-    # Webcam específica
-    python detector.py --fuente 1
-
-    # Archivo de vídeo (.webm, .mp4, ...)
-    python detector.py --fuente imgs/video.webm
-
-Opciones:
-    --conf   0.35     Confianza mínima YOLO (0-1)
-    --cada   5        Analizar 1 de cada N frames (sólo vídeo/webcam)
-    --visual          Guardar imagen anotada (sólo modo imagen)
-    --spots  ruta     Ruta al spots.json (def: imgs/spots.json)
-
-Controles (modo vídeo/webcam):
-    G        → guardar captura actual (imagen + JSON)
-    Q / ESC  → salir
-────────────────────────────────────────────────
 """
 
 import cv2
@@ -45,35 +14,45 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# REFACTORIZACIÓN: Importación de vuestras constantes y configuraciones exactas
+# REFACTORIZACIÓN INTEGRAL: Importación estricta de vuestros parámetros validados
 from config import (
     SPOTS_JSON, OUTPUT_DIR, ESTADO_ACTUAL, NUM_PLAZAS, CONF_UMBRAL,
     SOLAPAMIENTO_MIN, MODELO_YOLO, COL_LIBRE, COL_OCUPADA, COL_YOLO
 )
 
-# ══════════════════════════════════════════════
-# Utilidades comunes
-# ══════════════════════════════════════════════
 
-def cargar_spots(path: Path):
-    with open(path) as f:
+def cargar_spots(path: Path) -> list:
+    """Deserializa de forma segura el archivo de configuración de plazas."""
+    if not path.exists():
+        print(f"⚠ Alerta: Archivo de plazas no encontrado en '{path}'")
+        return []
+    with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 
-def bbox_en_zona(x1, y1, x2, y2, puntos):
-    """True si al menos SOLAPAMIENTO_MIN del bbox está dentro del polígono."""
+def bbox_en_zona(x1, y1, x2, y2, puntos) -> bool:
+    """
+    GEOMETRÍA COMPUTACIONAL (IoU LOCAL):
+    Calcula la fracción del Bounding Box de la IA contenida dentro de la ROI de la plaza.
+    Aplica una operación matricial binaria de conteo de densidades distintas de cero.
+    """
     w, h = x2 - x1, y2 - y1
     if w <= 0 or h <= 0:
         return False
-    # Máscara del tamaño del bbox con el polígono relativo a su esquina superior izquierda
+    
+    # Translación lineal al espacio de coordenadas local de la caja delimitadora
     pts_local = np.array([[p[0] - x1, p[1] - y1] for p in puntos], dtype=np.int32)
     mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # Rellenamos la ROI local en la máscara de bits
     cv2.fillPoly(mask, [pts_local], 255)
+    
+    # Evaluación matemática de coincidencia contra vuestro umbral estricto SOLAPAMIENTO_MIN
     return np.count_nonzero(mask) / (w * h) >= SOLAPAMIENTO_MIN
 
 
-def detectar(model, frame, conf):
-    """Ejecuta YOLO sobre un frame y devuelve bboxes de todos los objetos."""
+def detectar(model, frame, conf) -> list:
+    """Ejecuta la inferencia sobre el tensor de imagen y extrae las bounding boxes."""
     results = model(frame, conf=conf, verbose=False)[0]
     boxes = []
     for box in results.boxes:
@@ -82,8 +61,8 @@ def detectar(model, frame, conf):
     return boxes
 
 
-def calcular_resultados(spots, boxes):
-    """Cuenta objetos detectados que solapan con cada zona ROI."""
+def calcular_resultados(spots, boxes) -> list:
+    """Evalúa de forma espacial cuántas entidades YOLO intersectan en cada ROI."""
     resultados = []
     for s in spots:
         coches = [b for b in boxes if bbox_en_zona(*b, s["points"])]
@@ -94,49 +73,55 @@ def calcular_resultados(spots, boxes):
     return resultados
 
 
-def dibujar(frame, spots, resultados, boxes):
-    """Dibuja zonas ROI, bboxes YOLO y HUD sobre el frame."""
+def dibujar(frame, spots, resultados, boxes) -> np.ndarray:
+    """Capa de visualización: Genera la superposición de colores semáforo y cajas YOLO."""
     overlay = frame.copy()
 
     total_coches = sum(r["coches_dentro"] for r in resultados)
     libres       = max(0, NUM_PLAZAS - total_coches)
     ocupadas     = NUM_PLAZAS - libres
 
+    # Pintado de las Regiones de Interés Poligonales
     for s, r in zip(spots, resultados):
-        color  = COL_LIBRE if libres > 0 else COL_OCUPADA
+        # Lógica semáforo: Si la zona específica contiene vehículos, cambia de estado
+        color  = COL_OCUPADA if r["coches_dentro"] > 0 else COL_LIBRE
         pts_np = np.array(s["points"], dtype=np.int32)
+        
         cv2.fillPoly(overlay, [pts_np], color)
-        cv2.polylines(frame, [pts_np], isClosed=True, color=color, thickness=2)
+        cv2.polylines(frame, [pts_np], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+        
         cx = int(pts_np[:, 0].mean())
         cy = int(pts_np[:, 1].mean())
-        cv2.putText(frame, f"Zona {s['id']}: {r['coches_dentro']} coches",
-                    (cx - 50, cy + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        cv2.putText(frame, f"Z{s['id']}: {r['coches_dentro']} veh",
+                    (cx - 35, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
 
+    # Fusión alfanumérica de transparencia (Blending)
     cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
 
+    # Renderizado de los Bounding Boxes de YOLO (Color Naranja Corporativo)
     for x1, y1, x2, y2 in boxes:
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COL_YOLO, 1)
-        cv2.circle(frame, ((x1+x2)//2, (y1+y2)//2), 5, (0, 0, 255), -1)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COL_YOLO, 1, lineType=cv2.LINE_AA)
+        cv2.circle(frame, ((x1+x2)//2, (y1+y2)//2), 4, (0, 0, 255), -1)
 
-    # HUD superior
-    cv2.rectangle(frame, (0, 0), (400, 34), (30, 30, 30), -1)
+    # Panel de control de usuario (HUD Superior)
+    cv2.rectangle(frame, (0, 0), (420, 35), (30, 30, 30), -1)
     cv2.putText(frame,
-                f"Libres: {libres}/{NUM_PLAZAS}  Ocupadas: {ocupadas}/{NUM_PLAZAS}",
-                (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+                f"Libres: {libres}/{NUM_PLAZAS} | Ocupadas: {ocupadas}/{NUM_PLAZAS}",
+                (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
 
     return frame
 
 
-def dibujar_leyenda_video(frame):
+def dibujar_leyenda_video(frame) -> np.ndarray:
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (0, h - 30), (w, h), (30, 30, 30), -1)
-    cv2.putText(frame, "[G] guardar captura   [Q/ESC] salir",
-                (8, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    cv2.putText(frame, "[G] Guardar Captura   [Q/ESC] Salir",
+                (15, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
     return frame
 
 
 def guardar_estado_actual(resultados):
-    """Sobreescribe imgs/estado_actual.json con el estado más reciente."""
+    """Vuelca el estado transaccional numérico en un archivo JSON plano."""
     total_coches = sum(r["coches_dentro"] for r in resultados)
     libres       = max(0, NUM_PLAZAS - total_coches)
     datos = {
@@ -147,11 +132,12 @@ def guardar_estado_actual(resultados):
         "zonas":        resultados
     }
     ESTADO_ACTUAL.parent.mkdir(parents=True, exist_ok=True)
-    with open(ESTADO_ACTUAL, "w") as f:
+    with open(ESTADO_ACTUAL, "w", encoding="utf-8") as f:
         json.dump(datos, f, indent=2, ensure_ascii=False)
 
 
 def guardar_captura(resultados, fuente, frame=None):
+    """Almacena auditorías históricas multimedia en el disco."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -167,30 +153,22 @@ def guardar_captura(resultados, fuente, frame=None):
     }
 
     json_path = OUTPUT_DIR / f"estado_{ts}.json"
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(datos, f, indent=2, ensure_ascii=False)
 
     if frame is not None:
         img_path = OUTPUT_DIR / f"captura_{ts}.png"
         cv2.imwrite(str(img_path), frame)
-        print(f"✓ Guardado: {img_path.name}  +  {json_path.name}")
+        print(f"✓ Guardado: {img_path.name} y {json_path.name}")
     else:
         print(f"✓ JSON guardado: {json_path.name}")
 
-    print(f"  🟢 Libres: {libres}  🔴 Ocupadas: {NUM_PLAZAS - libres}")
-    for r in resultados:
-        print(f"  Zona {r['id']:>2}  Coches dentro: {r['coches_dentro']}")
-
-
-# ══════════════════════════════════════════════
-# Modos de ejecución
-# ══════════════════════════════════════════════
 
 def modo_imagen(model, path: Path, spots, conf, guardar_visual):
     print(f"▸ Modo IMAGEN: {path}")
     frame = cv2.imread(str(path))
     if frame is None:
-        raise FileNotFoundError(f"No se encontró: {path}")
+        raise FileNotFoundError(f"No se encontró el recurso: {path}")
 
     boxes = detectar(model, frame, conf)
     print(f"  → {len(boxes)} objetos detectados")
@@ -201,9 +179,7 @@ def modo_imagen(model, path: Path, spots, conf, guardar_visual):
     guardar_estado_actual(resultados)
     guardar_captura(resultados, path, frame=frame_viz if guardar_visual else None)
 
-    # Mostrar siempre la ventana en modo imagen
-    cv2.imshow("Detector aparcamiento — imagen", frame_viz)
-    print("  Pulsa cualquier tecla para cerrar...")
+    cv2.imshow("Detector aparcamiento — Modo Estatico", frame_viz)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -215,44 +191,41 @@ def modo_video(model, fuente, spots, conf, cada):
 
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
-        raise RuntimeError(f"No se pudo abrir: {fuente}")
+        raise RuntimeError(f"No se pudo inicializar la fuente: {fuente}")
 
-    resultados  = [{"id": s["id"], "estado": "...", "coches_dentro": 0} for s in spots]
+    resultados  = [{"id": s["id"], "coches_dentro": 0} for s in spots]
     boxes       = []
     frame_count = 0
-
-    print("▸ Detección activa. [G]=guardar  [Q/ESC]=salir\n")
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            continue
+            # Bucle continuo si es un archivo de vídeo fijo
+            if isinstance(src, str):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+            break
 
         frame_count += 1
 
+        # Optimización computacional: Inferencia diferida 1 de cada N fotogramas
         if frame_count % cada == 0:
             boxes      = detectar(model, frame, conf)
             resultados = calcular_resultados(spots, boxes)
 
         frame_viz = dibujar(frame.copy(), spots, resultados, boxes)
         frame_viz = dibujar_leyenda_video(frame_viz)
-        cv2.imshow("Detector aparcamiento", frame_viz)
+        cv2.imshow("Detector de Aparcamiento Inteligente", frame_viz)
 
         key = cv2.waitKey(1) & 0xFF
-        if key in (ord('q'), ord('Q'), 27):
+        if key in (27, ord('q'), ord('Q')):
             break
         elif key in (ord('g'), ord('G')):
             guardar_captura(resultados, fuente, frame=frame_viz)
 
     cap.release()
     cv2.destroyAllWindows()
-    print("✓ Detector cerrado")
 
-
-# ══════════════════════════════════════════════
-# Main
-# ══════════════════════════════════════════════
 
 EXTENSIONES_IMAGEN = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
 EXTENSIONES_VIDEO  = {".webm", ".mp4", ".avi", ".mov", ".mkv"}
@@ -262,39 +235,32 @@ def detectar_modo(fuente: str) -> str:
     sufijo = Path(fuente).suffix.lower()
     if sufijo in EXTENSIONES_IMAGEN:
         return "imagen"
-    if sufijo in EXTENSIONES_VIDEO:
-        return "video"
-    return "video"   # webcam (número) o stream
+    return "video"
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Detector de aparcamiento — imagen / webcam / vídeo"
-    )
-    parser.add_argument("--fuente",  default="0",
-                        help="Imagen (.png/.jpg), índice webcam (0,1…) o vídeo (.webm/.mp4) (def: 0)")
-    parser.add_argument("--conf",    type=float, default=CONF_UMBRAL,
-                        help=f"Confianza YOLO 0-1 (def: {CONF_UMBRAL})")
-    parser.add_argument("--visual",  action="store_true",
-                        help="Guardar imagen anotada en imgs/capturas/ (modo imagen)")
-    parser.add_argument("--spots",   default=str(SPOTS_JSON),
-                        help=f"Ruta al spots.json (def: {SPOTS_JSON})")
+    parser = argparse.ArgumentParser(description="Detector de aparcamiento — pipeline core")
+    parser.add_argument("--fuente",  default="0", help="Recurso multimedia o ID cámara web")
+    parser.add_argument("--conf",    type=float, default=CONF_UMBRAL, help="Umbral analítico")
+    parser.add_argument("--cada",    type=int, default=5, help="Muestreo adaptativo de frames")
+    parser.add_argument("--visual",  action="store_true", help="Salida gráfica en disco")
+    parser.add_argument("--spots",   default=str(SPOTS_JSON), help="Ruta al mapa JSON")
     args = parser.parse_args()
 
-    print("▸ Cargando YOLOv8...")
+    print(f"▸ Inicializando Framework de IA: {MODELO_YOLO}...")
     from ultralytics import YOLO
-    model = MODELO_YOLO
+    # Aquí instanciamos de verdad el modelo matemático con la clase YOLO
+    model_instanciado = YOLO(MODELO_YOLO)
 
-    print(f"▸ Cargando plazas desde '{args.spots}'...")
     spots = cargar_spots(Path(args.spots))
-    print(f"  → {len(spots)} plazas cargadas\n")
+    print(f"  → {len(spots)} zonas cargadas en la caché estructural\n")
 
     modo = detectar_modo(args.fuente)
 
     if modo == "imagen":
-        modo_imagen(model, Path(args.fuente), spots, args.conf, args.visual)
+        modo_imagen(model_instanciado, Path(args.fuente), spots, args.conf, args.visual)
     else:
-        modo_video(model, args.fuente, spots, args.conf, args.cada)
+        modo_video(model_instanciado, args.fuente, spots, args.conf, args.cada)
 
 
 if __name__ == "__main__":
