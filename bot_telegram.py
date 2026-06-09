@@ -38,7 +38,7 @@ IMAGEN_PATH = Path("imgs/1.png")
 # ── Carga única al arrancar ───────────────────
 print("▸ Cargando modelo YOLO...")
 from ultralytics import YOLO
-model = YOLO("yolov8n.pt")
+model = YOLO("yolo11x.pt")
 
 print(f"▸ Cargando plazas desde '{SPOTS_JSON}'...")
 spots = cargar_spots(SPOTS_JSON)

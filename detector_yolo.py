@@ -282,7 +282,7 @@ def main():
 
     print("▸ Cargando YOLOv8...")
     from ultralytics import YOLO
-    model = YOLO("yolov8n.pt")
+    model = YOLO("yolo11x.pt")
 
     print(f"▸ Cargando plazas desde '{args.spots}'...")
     spots = cargar_spots(Path(args.spots))
