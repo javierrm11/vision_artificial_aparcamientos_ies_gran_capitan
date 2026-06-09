@@ -247,6 +247,23 @@ Escribe el número real de plazas o pulsa Enter para dejar que el detector lo es
 
 ---
 
+## Ejemplo de salida del detector
+
+```
+▸ Modo IMAGEN: imgs/1.png
+  → 11 objetos detectados
+✓ JSON guardado: estado_20260317_174205.json
+  🟢 Libres: 11   🔴 Ocupadas: 11
+  Zona  0  Coches dentro: 3
+  Zona  1  Coches dentro: 2
+  Zona  2  Coches dentro: 6
+```
+
+![ejemplo](./imgs/ejemplo1.png)
+![ejemplo](./imgs/ejemplo2.png)
+![ejemplo](./imgs/ejemplo3.png)
+
+---
 ## Mejoras posibles
 
 ### Detección
@@ -275,25 +292,7 @@ Escribe el número real de plazas o pulsa Enter para dejar que el detector lo es
 | **API REST** | Endpoint `/api/estado` que devuelve el JSON para integrarlo con otros sistemas |
 | **Despliegue como servicio** | Ejecutar el bot como servicio de Windows (`sc create`) o systemd en Linux |
 
----
-
-## Ejemplo de salida del detector
-
-```
-▸ Modo IMAGEN: imgs/1.png
-  → 11 objetos detectados
-✓ JSON guardado: estado_20260317_174205.json
-  🟢 Libres: 11   🔴 Ocupadas: 11
-  Zona  0  Coches dentro: 3
-  Zona  1  Coches dentro: 2
-  Zona  2  Coches dentro: 6
-```
-
-![ejemplo](./imgs/ejemplo1.png)
-![ejemplo](./imgs/ejemplo2.png)
-![ejemplo](./imgs/ejemplo3.png)
-
----
+--- 
 
 ## Créditos
 
