@@ -39,9 +39,10 @@ from datetime import datetime
 # ── Configuración por defecto ─────────────────
 SPOTS_JSON     = Path("imgs/spots.json")
 OUTPUT_DIR     = Path("imgs/capturas")
-ESTADO_ACTUAL  = Path("imgs/estado_actual.json")
-NUM_PLAZAS     = 22
-CONF_UMBRAL    = 0.30
+ESTADO_ACTUAL     = Path("imgs/estado_actual.json")
+NUM_PLAZAS        = 22
+CONF_UMBRAL       = 0.15
+SOLAPAMIENTO_MIN  = 0.10   # fracción mínima del bbox dentro del ROI (0.0-1.0)
 # ─────────────────────────────────────────────
 
 COL_LIBRE   = (0, 220, 80)
@@ -59,16 +60,15 @@ def cargar_spots(path: Path):
 
 
 def bbox_en_zona(x1, y1, x2, y2, puntos):
-    """True si algún punto del bbox o del polígono se solapan."""
-    pts = np.array(puntos, dtype=np.float32)
-    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-    for px, py in [(x1,y1),(x2,y1),(x2,y2),(x1,y2),(cx,cy)]:
-        if cv2.pointPolygonTest(pts, (float(px), float(py)), False) >= 0:
-            return True
-    for px, py in puntos:
-        if x1 <= px <= x2 and y1 <= py <= y2:
-            return True
-    return False
+    """True si al menos SOLAPAMIENTO_MIN del bbox está dentro del polígono."""
+    w, h = x2 - x1, y2 - y1
+    if w <= 0 or h <= 0:
+        return False
+    # Máscara del tamaño del bbox con el polígono relativo a su esquina superior izquierda
+    pts_local = np.array([[p[0] - x1, p[1] - y1] for p in puntos], dtype=np.int32)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(mask, [pts_local], 255)
+    return np.count_nonzero(mask) / (w * h) >= SOLAPAMIENTO_MIN
 
 
 def detectar(model, frame, conf):

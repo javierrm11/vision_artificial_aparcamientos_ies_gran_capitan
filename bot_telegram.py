@@ -19,6 +19,7 @@ Configuración:
 
 import io
 import os
+import random
 import cv2
 from pathlib import Path
 
@@ -33,7 +34,7 @@ from detector_yolo import (
 
 load_dotenv()
 
-IMAGEN_PATH = Path("imgs/1.png")
+IMAGENES = [Path(f"imgs/{i}.png") for i in range(1, 5)]
 
 # ── Carga única al arrancar ───────────────────
 print("▸ Cargando modelo YOLO...")
@@ -47,10 +48,11 @@ print(f"  → {len(spots)} zonas cargadas\n")
 
 
 def analizar_imagen() -> tuple[dict, bytes]:
-    frame = cv2.imread(str(IMAGEN_PATH))
+    imagen_path = random.choice(IMAGENES)
+    frame = cv2.imread(str(imagen_path))
     if frame is None:
-        raise FileNotFoundError(f"No se encontró la imagen: {IMAGEN_PATH}")
-    boxes      = detectar(model, frame, conf=0.30)
+        raise FileNotFoundError(f"No se encontró la imagen: {imagen_path}")
+    boxes      = detectar(model, frame, conf=0.15)
     resultados = calcular_resultados(spots, boxes)
     guardar_estado_actual(resultados)
 
@@ -96,8 +98,8 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         datos, foto = analizar_imagen()
         await msg.delete()
         await update.message.reply_photo(photo=foto, caption=formatear_respuesta(datos))
-    except FileNotFoundError:
-        await msg.edit_text(f"⚠️ No se encontró la imagen en {IMAGEN_PATH}.")
+    except FileNotFoundError as e:
+        await msg.edit_text(f"⚠️ {e}")
     except Exception as e:
         await msg.edit_text(f"⚠️ Error al analizar: {e}")
 
