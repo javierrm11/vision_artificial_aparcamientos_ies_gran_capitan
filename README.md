@@ -290,8 +290,8 @@ Escribe el número real de plazas o pulsa Enter para dejar que el detector lo es
 ```
 
 ![ejemplo](./imgs/ejemplo1.png)
+![ejemplo](./imgs/ejemplo2.png)
 ![ejemplo](./imgs/ejemplo3.png)
-![ejemplo](./imgs/ejemplo4.png)
 
 ---
 
