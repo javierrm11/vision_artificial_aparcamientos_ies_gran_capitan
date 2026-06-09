@@ -1,17 +1,18 @@
 """
-marcar_plazas.py
-────────────────────────────────────────────────
-Marca polígonos de plazas de aparcamiento sobre
-una imagen usando OpenCV (sin Colab ni ipywidgets).
+================================================================================
+MÓDULO DE CALIBRACIÓN GEOMÉTRICA: CALIBRADOR DE REGIONES DE INTERÉS (ROI)
+================================================================================
+Asignatura: Visión Artificial | Proyecto: Gestión de Aparcamiento Inteligente
+Desarrollado por: Javier y Pako 
 
-Controles:
-  Clic izquierdo  → añadir vértice
-  Doble clic      → cerrar plaza (mín. 3 puntos)
-  U               → deshacer (último punto o última plaza)
-  C               → cancelar plaza en curso
-  S               → guardar spots.json
-  Q / ESC         → salir (pregunta si guardar)
-────────────────────────────────────────────────
+PROPÓSITO TÉCNICO:
+Este script resuelve un problema de diseño crítico. Los modelos de Deep Learning
+como YOLO son óptimos detectando entidades físicas (coches), pero sufren tasas
+críticas de falsos positivos al intentar detectar "la nada" (plazas vacías). 
+Este módulo actúa como una etapa de calibración estática que digitaliza la 
+geometría del parking mediante OpenCV, abstrayendo las zonas de estacionamiento
+en estructuras de datos poligonales (arrays de NumPy) indexadas en un archivo JSON.
+================================================================================
 """
 
 import cv2
@@ -19,154 +20,216 @@ import json
 import numpy as np
 from pathlib import Path
 
-# ── Configuración ────────────────────────────────────────────
-IMG_PATH   = Path("imgs/1.png")          # imagen de referencia
-SPOTS_JSON = Path("imgs/spots.json")     # donde se guardará el JSON
-MAX_WIDTH  = 1280                        # ancho máximo de ventana
-# ─────────────────────────────────────────────────────────────
+# ── CONFIGURACIÓN DE RUTAS Y LIMITACIONES DE ENTORNO ──────────────────────────
+# Encapsulamos las rutas utilizando la librería orientada a objetos 'pathlib'.
+IMG_PATH   = Path("imgs/1.png")          # Matriz de referencia visual fija (webcam)
+SPOTS_JSON = Path("imgs/spots.json")     # Repositorio de persistencia de las ROIs
+MAX_WIDTH  = 1280                        # Factor de escala límite para evitar desbordamiento en monitores pequeños
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Colores BGR
-COL_CLOSED  = (0, 220, 80)    # verde  — plazas cerradas
-COL_CURRENT = (0, 220, 255)   # amarillo — polígono en curso
-COL_POINT   = (0, 180, 255)   # naranja  — vértices en curso
-COL_TEXT    = (0, 220, 80)
-COL_STATUS  = (255, 255, 255)
-
-
-def load_image(path: Path):
-    img = cv2.imread(str(path))
-    if img is None:
-        raise FileNotFoundError(f"No se encontró la imagen: {path}")
-    return img
+# PALETA CROMÁTICA EN FORMATO BGR (OpenCV Estándar)
+# OpenCV trabaja nativamente en BGR. Definimos los canales de color.
+COL_CLOSED  = (0, 220, 80)    # Verde  — Polígonos cerrados (Estructura ROI consolidada)
+COL_CURRENT = (0, 220, 255)   # Amarillo — Aristas del polígono en fase de dibujo
+COL_POINT   = (0, 180, 255)   # Naranja  — Vértices (puntos de control dimensional)
+COL_TEXT    = (0, 220, 80)    # Verde  — Texto de información general
+COL_STATUS  = (255, 255, 255) # Blanco — Barra de estado dinámica (Feedback en tiempo real)
 
 
-def compute_scale(img, max_width=MAX_WIDTH):
-    h, w = img.shape[:2]
-    scale = min(1.0, max_width / w)
-    return scale
+def load_spots(json_path: Path) -> list:
+    """
+    DESERIALIZACIÓN DE COORDENADAS:
+    Carga desde disco el histórico de plazas calibradas previamente. 
+    Transforma listas planas JSON de vuelta a tipos nativos de Python.
+    """
+    if not json_path.exists():
+        return []
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"⚠ Error al leer {json_path}: {e}")
+        return []
 
 
-def resize(img, scale):
-    h, w = img.shape[:2]
-    return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-
-
-def render(base_img, spots, current_pts, scale, status_msg=""):
-    """Dibuja plazas cerradas y el polígono en curso sobre base_img (escala display)."""
-    canvas = resize(base_img, scale).copy()
-    overlay = canvas.copy()
-
-    # ── Plazas cerradas ──
-    for s in spots:
-        pts_sc = np.array(
-            [[int(p[0] * scale), int(p[1] * scale)] for p in s["points"]],
-            dtype=np.int32
-        )
-        cv2.fillPoly(overlay, [pts_sc], COL_CLOSED)
-        cv2.polylines(canvas, [pts_sc], isClosed=True, color=COL_CLOSED, thickness=2)
-
-        cx = int(pts_sc[:, 0].mean())
-        cy = int(pts_sc[:, 1].mean())
-        cv2.putText(canvas, str(s["id"]), (cx - 8, cy + 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, COL_TEXT, 2)
-
-    cv2.addWeighted(overlay, 0.25, canvas, 0.75, 0, canvas)
-
-    # ── Polígono en curso ──
-    if current_pts:
-        pts_sc = [(int(p[0] * scale), int(p[1] * scale)) for p in current_pts]
-        for p in pts_sc:
-            cv2.circle(canvas, p, 5, COL_POINT, -1)
-        if len(pts_sc) > 1:
-            cv2.polylines(canvas,
-                          [np.array(pts_sc, dtype=np.int32)],
-                          isClosed=False, color=COL_CURRENT, thickness=2)
-
-    # ── Barra de estado ──
-    bar_h = 36
-    h, w = canvas.shape[:2]
-    cv2.rectangle(canvas, (0, h - bar_h), (w, h), (40, 40, 40), -1)
-    cv2.putText(canvas, status_msg, (10, h - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, COL_STATUS, 1)
-
-    # ── Leyenda ──
-    legend = "[DblClic] cerrar  [U] deshacer  [C] cancelar  [S] guardar  [Q] salir"
-    cv2.putText(canvas, legend, (10, 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
-
-    return canvas
-
-
-def save_spots(spots, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+def save_spots(spots: list, json_path: Path):
+    """
+    SERIALIZACIÓN Y PERSISTENCIA DE DATOS:
+    Vuelca las coordenadas estructurales a un fichero estructurado JSON.
+    Garantiza que el script 'detector_yolo.py' pueda consumir los datos de forma asíncrona.
+    """
+    # Creamos de forma recursiva el directorio padre si no existiese previamente
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_path, 'w', encoding='utf-8') as f:
+        # indent=2 optimiza la legibilidad del archivo para auditorías o modificaciones manuales
         json.dump(spots, f, indent=2)
-    print(f"✓ {len(spots)} plazas guardadas en '{path}'")
+
+
+def render(base_img, spots, current_pts, scale, status_msg) -> np.ndarray:
+    """
+    MOTOR DE RENDERIZADO GRÁFICO EN TIEMPO REAL:
+    Toma la imagen base y, aplicando primitivas gráficas de OpenCV sobre una copia de la matriz,
+    dibuja el estado actual de la calibración sin alterar el archivo original.
+    """
+    # .copy() es mandatorio para limpiar el buffer de dibujo en cada ciclo del loop (Evita el efecto arrastre)
+    frame = base_img.copy()
+
+    # 1. RENDERIZADO DE PLAZAS CONSOLIDADAS (Historial)
+    for spot in spots:
+        spot_id = spot["id"]
+        pts = np.array(spot["points"], np.int32)
+        
+        # Redimensionamos las coordenadas escaladas al tamaño actual de la pantalla de visualización
+        pts_scaled = (pts * scale).astype(np.int32)
+        
+        # cv2.polylines: Traza un polígono cerrado (isClosed=True) uniendo la secuencia de vértices
+        cv2.polylines(frame, [pts_scaled], isClosed=True, color=COL_CLOSED, thickness=2)
+        
+        # Cálculo del centroide del polígono para posicionar el ID flotante en el espacio correcto
+        moments = cv2.moments(pts_scaled)
+        if moments["m00"] != 0:
+            cx = int(moments["m10"] / moments["m00"])
+            cy = int(moments["m01"] / moments["m00"])
+        else:
+            # Plan B matemático si el cálculo por momentos colapsa (líneas concurrentes)
+            cx, cy = pts_scaled[0][0], pts_scaled[0][1]
+            
+        cv2.putText(frame, str(spot_id), (cx - 8, cy + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, COL_CLOSED, 2, cv2.LINE_AA)
+
+    # 2. RENDERIZADO DEL POLÍGONO EN CONSTRUCCIÓN (Fase activa)
+    if current_pts:
+        pts_curr = (np.array(current_pts, np.float32) * scale).astype(np.int32)
+        
+        # Pintamos los vértices individuales como círculos discretos (radio 4 píxeles)
+        for pt in pts_curr:
+            cv2.circle(frame, tuple(pt), 4, COL_POINT, -1, cv2.LINE_AA)
+            
+        # Si el usuario ha trazado al menos 2 puntos, mostramos la línea de tensión elástica
+        if len(pts_curr) > 1:
+            cv2.polylines(frame, [pts_curr], isClosed=False, color=COL_CURRENT, thickness=2)
+
+    # 3. INTERFAZ DE USUARIO INTEGRADA (HUD / OSD)
+    # Dibujamos un rectángulo inferior opaco que actúa como contenedor de la barra de estado
+    h, w = frame.shape[:2]
+    cv2.rectangle(frame, (0, h - 35), (w, h), (30, 30, 30), -1)
+    cv2.putText(frame, status_msg, (15, h - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COL_STATUS, 1, cv2.LINE_AA)
+
+    return frame
 
 
 def main():
-    base_img    = load_image(IMG_PATH)
-    scale       = compute_scale(base_img)
-    spots       = []
-    current_pts = []
-    status_msg  = f"Imagen cargada: {IMG_PATH}  |  Plazas: 0"
+    # Validación crítica: Detener ejecución si la fuente de datos (imagen de la webcam) no existe
+    if not IMG_PATH.exists():
+        print(f"Error crítico: No se encuentra la imagen de referencia en {IMG_PATH}")
+        return
 
-    WIN = "Marcador de plazas"
-    cv2.namedWindow(WIN, cv2.WINDOW_AUTOSIZE)
+    # Lectura de la imagen en formato BGR (Nativo de OpenCV)
+    orig_img = cv2.imread(str(IMG_PATH))
+    orig_h, orig_w = orig_img.shape[:2]
 
-    last_click_time = [0]   # lista para mutabilidad en closure
+    # CÁLCULO DILATACIÓN DE ESCALA: Garantiza la responsividad en pantallas de portátiles
+    scale = 1.0
+    if orig_w > MAX_WIDTH:
+        scale = MAX_WIDTH / orig_w
+        
+    new_w = int(orig_w * scale)
+    new_h = int(orig_h * scale)
+    
+    # Redimensionamos la matriz de visualización utilizando interpolación de área (Óptima para reducciones)
+    base_img = cv2.resize(orig_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
+    # Inicialización de estructuras en memoria
+    spots = load_spots(SPOTS_JSON)
+    current_pts = [] # Acumulador de vértices temporales
+    status_msg = f"Controles — Clic: Añadir | Doble Clic: Cerrar Plaza | Plazas: {len(spots)}"
+
+    WIN = "Calibrador de Plazas de Aparcamiento"
+    cv2.namedWindow(WIN)
+
+    # ── PROGRAMACIÓN ASÍNCRONA BASADA EN EVENTOS DE RATÓN (CALLBACKS) ─────────
+    # No usamos un bucle síncrono para leer el ratón. El sistema operativo 
+    # interrumpe la ejecución e invoca esta función ('mouse_cb') de 
+    # manera asíncrona cuando ocurre un evento.
     def mouse_cb(event, x, y, flags, param):
-        nonlocal status_msg
+        nonlocal current_pts, status_msg, spots
 
-        # Coordenadas en la imagen original
+        # Conversión espacial inversa: Llevamos las coordenadas de la ventana (escalada)
+        # de vuelta a las dimensiones reales de la imagen original (Matriz nativa).
         ox = int(x / scale)
         oy = int(y / scale)
 
+        # EVENTO: DOBLE CLIC IZQUIERDO -> Consolidación y cierre de geometría
         if event == cv2.EVENT_LBUTTONDBLCLK:
-            last_click_time[0] = 0   # resetear para no contar el dbl como clic simple
-            if len(current_pts) >= 3:
-                spot_id = len(spots)
-                spots.append({"id": spot_id, "points": [list(p) for p in current_pts]})
-                current_pts.clear()
-                status_msg = f"✓ Plaza {spot_id} cerrada  |  Total: {len(spots)}"
-            else:
-                status_msg = "⚠ Necesitas al menos 3 puntos para cerrar una plaza"
+            # Eliminamos los dos falsos clics que Windows genera antes de registrar un doble clic nativo
+            if len(current_pts) >= 2:
+                current_pts.pop()
+                current_pts.pop()
 
+            # Validación geométrica elemental: Un polígono cerrado bidimensional requiere mínimo 3 vértices
+            if len(current_pts) >= 3:
+                # Determinamos el ID secuencial autoincremental para la plaza
+                next_id = 0
+                if spots:
+                    next_id = max(s["id"] for s in spots) + 1
+                
+                # Almacenamos la estructura en memoria
+                spots.append({
+                    "id": next_id,
+                    "points": list(current_pts)
+                })
+                current_pts = [] # Vaciamos el acumulador temporal
+                status_msg = f"✓ Plaza {next_id} cerrada con éxito | Total: {len(spots)}"
+            else:
+                status_msg = "⚠ Error geométrico: Se requieren mínimo 3 vértices para cerrar una ROI"
+
+        # EVENTO: CLIC IZQUIERDO SIMPLE -> Adición de vértice vectorizado
         elif event == cv2.EVENT_LBUTTONDOWN:
             current_pts.append([ox, oy])
-            status_msg = f"Punto {len(current_pts)} añadido ({ox}, {oy})  |  Plazas: {len(spots)}"
+            status_msg = f"Vértice {len(current_pts)} registrado ({ox}, {oy}) | Plazas: {len(spots)}"
 
+    # Vinculamos la función callback a la ventana activa de OpenCV
     cv2.setMouseCallback(WIN, mouse_cb)
 
+    # ── BUCLE DE RENDERIZADO PRINCIPAL (MAIN LOOP) ────────────────────────────
     while True:
+        # 1. Actualizamos el frame gráfico procesando las listas dinámicas
         frame = render(base_img, spots, current_pts, scale, status_msg)
         cv2.imshow(WIN, frame)
 
+        # 2. Captura síncrona del teclado mediante enmascaramiento binario (& 0xFF)
         key = cv2.waitKey(20) & 0xFF
 
-        if key in (ord('q'), ord('Q'), 27):   # Q o ESC — salir
-            ans = input("¿Guardar antes de salir? [s/N]: ").strip().lower()
+        # CONTROL: Q o ESC -> Salida segura con flujo interactivo en terminal
+        if key in (ord('q'), ord('Q'), 27):
+            ans = input("⚠ Se han detectado cambios. ¿Desea salvar la sesión antes de salir? [s/N]: ").strip().lower()
             if ans == 's':
                 save_spots(spots, SPOTS_JSON)
             break
 
-        elif key in (ord('s'), ord('S')):      # S — guardar
+        # CONTROL: S -> Forzar guardado inmediato en caliente
+        elif key in (ord('s'), ord('S')):
             save_spots(spots, SPOTS_JSON)
-            status_msg = f"✓ Guardado  |  Plazas: {len(spots)}"
+            status_msg = f"✓ Archivo '{SPOTS_JSON}' serializado correctamente | Total: {len(spots)}"
 
-        elif key in (ord('u'), ord('U')):      # U — deshacer
+        # CONTROL: U -> Función Deshacer (Undo) basada en estructuras de Pilas (LIFO)
+        elif key in (ord('u'), ord('U')):
             if current_pts:
-                current_pts.pop()
-                status_msg = "Último punto eliminado"
+                current_pts.pop() # Elimina el último punto en construcción
+                status_msg = "Deshacer: Último vértice en curso eliminado"
             elif spots:
-                removed = spots.pop()
-                status_msg = f"Plaza {removed['id']} eliminada"
+                spots.pop() # Elimina la última plaza completamente consolidada
+                status_msg = "Deshacer: Última plaza consolidada eliminada"
+            else:
+                status_msg = "⚠ Nada que deshacer en el histórico"
 
-        elif key in (ord('c'), ord('C')):      # C — cancelar plaza en curso
-            current_pts.clear()
-            status_msg = "Plaza en curso cancelada"
+        # CONTROL: C -> Cancelar construcción activa
+        elif key in (ord('c'), ord('C')):
+            current_pts = []
+            status_msg = "Operación cancelada: Buffer de vértices vaciado"
 
+    # Liberación obligatoria de punteros gráficos del sistema operativo
     cv2.destroyAllWindows()
 
 
